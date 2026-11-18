@@ -1,0 +1,139 @@
+on LOAD {
+    ; ==== PILIH LAYANAN ====
+    ; Opsi: litterbox | catbox | 0x0 | img402
+    set %img_preset litterbox
+
+    ; ==== TERAPKAN PRESET ====
+    set %img_pre $lower(%img_preset)
+
+    if (%img_pre == litterbox) {
+        set %img_ep https://litterbox.catbox.moe/resources/internals/api.php
+        set %img_field fileToUpload
+        set %img_p1 reqtype=fileupload
+        set %img_p2 time=72h
+    }
+    if (%img_pre == catbox) {
+        set %img_ep https://catbox.moe/user/api.php
+        set %img_field fileToUpload
+        set %img_p1 reqtype=fileupload
+        set %img_p2 NA
+    }
+    if (%img_pre == 0x0) {
+        set %img_ep https://0x0.st
+        set %img_field file
+        set %img_p1 expires=168
+        set %img_p2 NA
+    }
+    if (%img_pre == img402) {
+        set %img_ep https://img402.dev/api/free
+        set %img_field image
+        set %img_p1 strip_exif=1
+        set %img_p2 NA
+    }
+
+    ; ==== AUTH (opsional) ====
+    set %img_auth NA
+}
+
+alias img {
+    if ($buffer == *server*) {
+        echo $buffer *** /img needs a channel or query. Use /imgme here.
+        return
+    }
+    media.pick -m image/* img_picked $buffer public
+}
+
+alias imgme {
+    media.pick -m image/* img_picked $buffer private
+}
+
+on SIGNAL:img_picked {
+    if ($mediaok != true) {
+        return
+    }
+    toast Uploading $medianame via %img_pre
+
+    if (%img_auth == NA) {
+        if (%img_p2 == NA) {
+            media.upload -f %img_field -p %img_p1 %img_ep $mediatoken img_done $1 $2
+            return
+        }
+        media.upload -f %img_field -p %img_p1 -p %img_p2 %img_ep $mediatoken img_done $1 $2
+        return
+    }
+    if (%img_p2 == NA) {
+        media.upload -f %img_field -p %img_p1 -h %img_auth %img_ep $mediatoken img_done $1 $2
+        return
+    }
+    media.upload -f %img_field -p %img_p1 -p %img_p2 -h %img_auth %img_ep $mediatoken img_done $1 $2
+}
+
+on SIGNAL:img_done {
+    if ($httpok != true) {
+        if ($httpstatus == 0) {
+            echo $1 *** upload failed: $httperror
+            return
+        }
+        echo $1 *** upload failed $httpstatus
+        set %img_snip $substr($httpbody, 0, 150)
+        echo $1 body: %img_snip
+        return
+    }
+
+    set %img_body $trim($httpbody)
+    set %img_url NA
+
+    ; ==== Cek plain URL (Catbox/Litterbox/0x0.st) ====
+    if ($contains(%img_body, https://) == true) {
+        if ($contains(%img_body, <) == false) {
+            if ($len(%img_body) < 500) {
+                set %img_url %img_body
+            }
+        }
+    }
+
+    ; ==== Cek JSON filePath (boxlabs style) ====
+    if (%img_url == NA) {
+        if ($contains(%img_body, filePath) == true) {
+            set %img_tmp $json(%img_body, results.0.filePath)
+            if ($len(%img_tmp) > 0) {
+                set %img_url %img_tmp
+            }
+        }
+    }
+
+    ; ==== Cek JSON url (img402 style) ====
+    if (%img_url == NA) {
+        set %img_tmp $json(%img_body, url)
+        if ($len(%img_tmp) > 4) {
+            set %img_url %img_tmp
+        }
+    }
+
+    ; ==== Cek JSON data.url ====
+    if (%img_url == NA) {
+        set %img_tmp $json(%img_body, data.url)
+        if ($len(%img_tmp) > 4) {
+            set %img_url %img_tmp
+        }
+    }
+
+    ; ==== Validasi ====
+    if (%img_url == NA) {
+        echo $1 *** upload ok, but no URL found
+        set %img_snip $substr(%img_body, 0, 150)
+        echo $1 body: %img_snip
+        return
+    }
+    if ($len(%img_url) < 8) {
+        echo $1 *** URL too short, ignored
+        return
+    }
+
+    ; ==== Kirim ====
+    if ($2 == public) {
+        msg $1 %img_url
+    } else {
+        echo $1 %img_url
+    }
+}
